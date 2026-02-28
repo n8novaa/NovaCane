@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "323899833878",
+    "project_id": "novacane-4cdff",
+    "storage_bucket": "novacane-4cdff.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:323899833878:android:edee786e207e213ec73f37",
+        "android_client_info": {
+          "package_name": "com.example.novacane"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCGqQUWHaZWcDPpCeA4tAAvMp23metbUtI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

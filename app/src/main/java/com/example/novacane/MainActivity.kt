@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothSocket
 import android.content.Context
 import android.content.pm.PackageManager
+import android.location.Location
 import android.os.Build
 import android.os.Bundle
 import android.os.VibrationEffect
@@ -22,6 +23,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationServices
+import com.google.firebase.database.*
 import java.io.InputStream
 import java.util.*
 import kotlin.concurrent.thread
@@ -30,6 +34,8 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var tts: TextToSpeech
     private lateinit var vibrator: Vibrator
+    private lateinit var database: DatabaseReference
+    private lateinit var fusedLocationClient: FusedLocationProviderClient
 
     private val deviceName = "NovaCane_ESP32"
     private val uuid: UUID =
@@ -44,13 +50,15 @@ class MainActivity : ComponentActivity() {
     private val speechCooldown = 3000L
     private var lastZone = -1
 
-    // ✅ ROLE STATE MOVED TO ACTIVITY LEVEL
     private val selectedRoleState = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Back button handling (modern)
+        database = FirebaseDatabase.getInstance().reference
+        fusedLocationClient =
+            LocationServices.getFusedLocationProviderClient(this)
+
         onBackPressedDispatcher.addCallback(this,
             object : OnBackPressedCallback(true) {
                 override fun handleOnBackPressed() {
@@ -76,6 +84,18 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // Location permission
+        if (ActivityCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
+                2
+            )
+        }
+
         tts = TextToSpeech(this) {
             if (it == TextToSpeech.SUCCESS) {
                 tts.language = Locale.US
@@ -84,9 +104,7 @@ class MainActivity : ComponentActivity() {
 
         vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
 
-        setContent {
-            AppEntryPoint()
-        }
+        setContent { AppEntryPoint() }
 
         connectBluetooth()
     }
@@ -110,91 +128,135 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ================= ROLE SCREEN =================
+    // ================= ROLE SELECTION =================
 
     @Composable
     fun RoleSelectionScreen(onRoleSelected: (String) -> Unit) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(20.dp),
+            modifier = Modifier.fillMaxSize().padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-
             Text("Nova Cane", fontSize = 26.sp)
-
             Spacer(modifier = Modifier.height(40.dp))
 
             Button(
                 modifier = Modifier.fillMaxWidth(),
                 onClick = { onRoleSelected("USER") }
-            ) {
-                Text("USER")
-            }
+            ) { Text("USER") }
 
             Spacer(modifier = Modifier.height(20.dp))
 
             Button(
                 modifier = Modifier.fillMaxWidth(),
                 onClick = { onRoleSelected("GUARDIAN") }
-            ) {
-                Text("GUARDIAN")
-            }
+            ) { Text("GUARDIAN") }
         }
     }
 
-    // ================= USER DASHBOARD =================
+    // ================= USER =================
 
     @Composable
     fun UserDashboard() {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(20.dp),
+            modifier = Modifier.fillMaxSize().padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-
             Text("Nova Cane – User Dashboard", fontSize = 22.sp)
 
             Spacer(Modifier.height(20.dp))
-
             Text("Distance: ${distanceState.value} cm", fontSize = 20.sp)
 
             Spacer(Modifier.height(10.dp))
-
             Text("Alert: ${alertState.value}", fontSize = 18.sp)
 
             Spacer(Modifier.height(30.dp))
 
             Button(
                 modifier = Modifier.fillMaxWidth(),
-                onClick = {
-                    alertState.value = "Emergency alert sent"
-                    speakSafe("Emergency alert sent")
-                }
-            ) {
-                Text("SOS")
-            }
+                onClick = { sendSOS() }
+            ) { Text("SOS") }
         }
     }
 
-    // ================= GUARDIAN DASHBOARD =================
+    // ================= SOS =================
+
+    private fun sendSOS() {
+
+        if (ActivityCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            alertState.value = "Location permission not granted"
+            return
+        }
+
+        try {
+
+            fusedLocationClient.lastLocation
+                .addOnSuccessListener { location: Location? ->
+
+                    if (location != null) {
+
+                        val sosData = mapOf(
+                            "status" to "SOS",
+                            "latitude" to location.latitude,
+                            "longitude" to location.longitude,
+                            "timestamp" to System.currentTimeMillis()
+                        )
+
+                        database.child("NovaCane")
+                            .child("sos")
+                            .setValue(sosData)
+
+                        alertState.value = "SOS Sent"
+                        speakSafe("Emergency alert sent")
+                    } else {
+                        alertState.value = "Location unavailable"
+                    }
+                }
+
+        } catch (e: SecurityException) {
+            alertState.value = "Location access denied"
+        }
+    }
+    // ================= GUARDIAN =================
 
     @Composable
     fun GuardianDashboard() {
+
+        var guardianDistance by remember { mutableStateOf("--") }
+        var guardianAlert by remember { mutableStateOf("Waiting...") }
+
+        LaunchedEffect(Unit) {
+            database.child("NovaCane").child("liveData")
+                .addValueEventListener(object : ValueEventListener {
+                    override fun onDataChange(snapshot: DataSnapshot) {
+                        val distance =
+                            snapshot.child("distance").getValue(Int::class.java)
+                        val alert =
+                            snapshot.child("alert").getValue(String::class.java)
+
+                        if (distance != null)
+                            guardianDistance = distance.toString()
+                        if (alert != null)
+                            guardianAlert = alert
+                    }
+
+                    override fun onCancelled(error: DatabaseError) {}
+                })
+        }
+
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(20.dp),
+            modifier = Modifier.fillMaxSize().padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-
             Text("Guardian Mode", fontSize = 24.sp)
-
             Spacer(modifier = Modifier.height(20.dp))
-
-            Text("Waiting for SOS alerts...")
+            Text("Distance: $guardianDistance cm")
+            Spacer(modifier = Modifier.height(10.dp))
+            Text("Alert: $guardianAlert")
         }
     }
 
@@ -202,38 +264,20 @@ class MainActivity : ComponentActivity() {
 
     private fun connectBluetooth() {
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (ActivityCompat.checkSelfPermission(
-                    this,
-                    Manifest.permission.BLUETOOTH_CONNECT
-                ) != PackageManager.PERMISSION_GRANTED
-            ) return
-        }
-
         val pairedDevices = bluetoothAdapter?.bondedDevices
         val device = pairedDevices?.firstOrNull { it.name == deviceName }
 
         if (device != null) {
-
             val socket = device.createRfcommSocketToServiceRecord(uuid)
 
             thread {
                 try {
                     socket.connect()
-                    runOnUiThread {
-                        alertState.value = "Bluetooth connected"
-                    }
                     readData(socket.inputStream)
                 } catch (e: Exception) {
                     e.printStackTrace()
-                    runOnUiThread {
-                        alertState.value = "Bluetooth connection failed"
-                    }
                 }
             }
-
-        } else {
-            alertState.value = "ESP32 not paired"
         }
     }
 
@@ -243,7 +287,6 @@ class MainActivity : ComponentActivity() {
         while (true) {
             val bytes = inputStream.read(buffer)
             val receivedData = String(buffer, 0, bytes)
-            Log.d("BT_DATA", receivedData)
 
             val messages = receivedData.split("\n")
 
@@ -254,6 +297,14 @@ class MainActivity : ComponentActivity() {
                     runOnUiThread {
 
                         distanceState.value = distance.toString()
+
+                        database.child("NovaCane").child("liveData")
+                            .setValue(
+                                mapOf(
+                                    "distance" to distance,
+                                    "alert" to alertState.value
+                                )
+                            )
 
                         val zone = when {
                             distance < 30 -> 0
@@ -302,11 +353,10 @@ class MainActivity : ComponentActivity() {
 
         lastSpokenTime = currentTime
 
-        if (language == "ml") {
+        if (language == "ml")
             tts.language = Locale.forLanguageTag("ml-IN")
-        } else {
+        else
             tts.language = Locale.US
-        }
 
         tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
     }
