@@ -2,16 +2,15 @@ package com.example.novacane
 
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothSocket
 import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Location
+import android.media.MediaPlayer
 import android.os.Build
 import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.speech.tts.TextToSpeech
-import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.OnBackPressedCallback
@@ -37,9 +36,13 @@ class MainActivity : ComponentActivity() {
     private lateinit var database: DatabaseReference
     private lateinit var fusedLocationClient: FusedLocationProviderClient
 
+    private var mediaPlayer: MediaPlayer? = null
+    private var isEmergencyActive = false
+
     private val deviceName = "NovaCane_ESP32"
     private val uuid: UUID =
         UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
+
     private val bluetoothAdapter: BluetoothAdapter? =
         BluetoothAdapter.getDefaultAdapter()
 
@@ -64,37 +67,11 @@ class MainActivity : ComponentActivity() {
                 override fun handleOnBackPressed() {
                     if (selectedRoleState.value != null) {
                         selectedRoleState.value = null
-                    } else {
-                        finish()
-                    }
+                    } else finish()
                 }
             })
 
-        // Bluetooth permission
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (ActivityCompat.checkSelfPermission(
-                    this,
-                    Manifest.permission.BLUETOOTH_CONNECT
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
-                requestPermissions(
-                    arrayOf(Manifest.permission.BLUETOOTH_CONNECT),
-                    1
-                )
-            }
-        }
-
-        // Location permission
-        if (ActivityCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(
-                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
-                2
-            )
-        }
+        requestPermissions()
 
         tts = TextToSpeech(this) {
             if (it == TextToSpeech.SUCCESS) {
@@ -109,6 +86,32 @@ class MainActivity : ComponentActivity() {
         connectBluetooth()
     }
 
+    private fun requestPermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (ActivityCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.BLUETOOTH_CONNECT
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                requestPermissions(
+                    arrayOf(Manifest.permission.BLUETOOTH_CONNECT),
+                    1
+                )
+            }
+        }
+
+        if (ActivityCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
+                2
+            )
+        }
+    }
+
     // ================= ENTRY =================
 
     @Composable
@@ -120,11 +123,8 @@ class MainActivity : ComponentActivity() {
                 selectedRoleState.value = role
             }
         } else {
-            if (selectedRole == "USER") {
-                UserDashboard()
-            } else {
-                GuardianDashboard()
-            }
+            if (selectedRole == "USER") UserDashboard()
+            else GuardianDashboard()
         }
     }
 
@@ -192,35 +192,30 @@ class MainActivity : ComponentActivity() {
             return
         }
 
-        try {
+        fusedLocationClient.lastLocation
+            .addOnSuccessListener { location: Location? ->
 
-            fusedLocationClient.lastLocation
-                .addOnSuccessListener { location: Location? ->
+                if (location != null) {
 
-                    if (location != null) {
+                    val sosData = mapOf(
+                        "status" to "SOS",
+                        "latitude" to location.latitude,
+                        "longitude" to location.longitude,
+                        "timestamp" to System.currentTimeMillis()
+                    )
 
-                        val sosData = mapOf(
-                            "status" to "SOS",
-                            "latitude" to location.latitude,
-                            "longitude" to location.longitude,
-                            "timestamp" to System.currentTimeMillis()
-                        )
+                    database.child("NovaCane")
+                        .child("sos")
+                        .setValue(sosData)
 
-                        database.child("NovaCane")
-                            .child("sos")
-                            .setValue(sosData)
-
-                        alertState.value = "SOS Sent"
-                        speakSafe("Emergency alert sent")
-                    } else {
-                        alertState.value = "Location unavailable"
-                    }
+                    alertState.value = "SOS Sent"
+                    speakSafe("Emergency alert sent")
+                } else {
+                    alertState.value = "Location unavailable"
                 }
-
-        } catch (e: SecurityException) {
-            alertState.value = "Location access denied"
-        }
+            }
     }
+
     // ================= GUARDIAN =================
 
     @Composable
@@ -228,36 +223,144 @@ class MainActivity : ComponentActivity() {
 
         var guardianDistance by remember { mutableStateOf("--") }
         var guardianAlert by remember { mutableStateOf("Waiting...") }
+        var emergencyActive by remember { mutableStateOf(false) }
+        var sosLatitude by remember { mutableStateOf(0.0) }
+        var sosLongitude by remember { mutableStateOf(0.0) }
 
-        LaunchedEffect(Unit) {
+        val liveDataRef = remember {
             database.child("NovaCane").child("liveData")
-                .addValueEventListener(object : ValueEventListener {
-                    override fun onDataChange(snapshot: DataSnapshot) {
-                        val distance =
-                            snapshot.child("distance").getValue(Int::class.java)
-                        val alert =
-                            snapshot.child("alert").getValue(String::class.java)
+        }
 
-                        if (distance != null)
-                            guardianDistance = distance.toString()
-                        if (alert != null)
-                            guardianAlert = alert
+        val sosRef = remember {
+            database.child("NovaCane").child("sos")
+        }
+
+        DisposableEffect(Unit) {
+
+            // Live data listener
+            val liveListener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    guardianDistance =
+                        snapshot.child("distance")
+                            .getValue(Int::class.java)?.toString() ?: "--"
+
+                    guardianAlert =
+                        snapshot.child("alert")
+                            .getValue(String::class.java) ?: "Waiting..."
+                }
+
+                override fun onCancelled(error: DatabaseError) {}
+            }
+
+            // SOS listener (ONLY GUARDIAN)
+            val sosListener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+
+                    val status =
+                        snapshot.child("status")
+                            .getValue(String::class.java)
+
+                    val lat =
+                        snapshot.child("latitude")
+                            .getValue(Double::class.java)
+
+                    val lon =
+                        snapshot.child("longitude")
+                            .getValue(Double::class.java)
+
+                    if (status == "SOS" && !isEmergencyActive) {
+
+                        isEmergencyActive = true
+                        emergencyActive = true
+
+                        if (lat != null && lon != null) {
+                            sosLatitude = lat
+                            sosLongitude = lon
+                        }
+
+                        playAlertSound()
                     }
 
-                    override fun onCancelled(error: DatabaseError) {}
-                })
+                    if (status != "SOS") {
+                        stopAlertSound()
+                        isEmergencyActive = false
+                        emergencyActive = false
+                    }
+                }
+
+                override fun onCancelled(error: DatabaseError) {}
+            }
+
+            liveDataRef.addValueEventListener(liveListener)
+            sosRef.addValueEventListener(sosListener)
+
+            onDispose {
+                liveDataRef.removeEventListener(liveListener)
+                sosRef.removeEventListener(sosListener)
+                stopAlertSound()
+            }
         }
 
-        Column(
-            modifier = Modifier.fillMaxSize().padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text("Guardian Mode", fontSize = 24.sp)
-            Spacer(modifier = Modifier.height(20.dp))
-            Text("Distance: $guardianDistance cm")
-            Spacer(modifier = Modifier.height(10.dp))
-            Text("Alert: $guardianAlert")
+        if (emergencyActive) {
+
+            Column(
+                modifier = Modifier.fillMaxSize().padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text("🚨 EMERGENCY ALERT 🚨", fontSize = 26.sp)
+                Spacer(modifier = Modifier.height(20.dp))
+                Text("Latitude: $sosLatitude")
+                Text("Longitude: $sosLongitude")
+
+                Spacer(modifier = Modifier.height(30.dp))
+
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        database.child("NovaCane")
+                            .child("sos")
+                            .child("status")
+                            .setValue("SAFE")
+                    }
+                ) {
+                    Text("MARK AS SAFE")
+                }
+            }
+
+        } else {
+
+            Column(
+                modifier = Modifier.fillMaxSize().padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("Guardian Mode", fontSize = 24.sp)
+                Spacer(modifier = Modifier.height(20.dp))
+                Text("Distance: $guardianDistance cm")
+                Spacer(modifier = Modifier.height(10.dp))
+                Text("Alert: $guardianAlert")
+            }
         }
+    }
+    // ================= ALERT SOUND =================
+
+    private fun playAlertSound() {
+
+        if (mediaPlayer == null) {
+            mediaPlayer = MediaPlayer.create(
+                this,
+                android.provider.Settings.System.DEFAULT_ALARM_ALERT_URI
+            )
+            mediaPlayer?.isLooping = true
+            mediaPlayer?.start()
+        }
+    }
+
+
+    private fun stopAlertSound() {
+        mediaPlayer?.stop()
+        mediaPlayer?.release()
+        mediaPlayer = null
     }
 
     // ================= BLUETOOTH =================
@@ -287,7 +390,6 @@ class MainActivity : ComponentActivity() {
         while (true) {
             val bytes = inputStream.read(buffer)
             val receivedData = String(buffer, 0, bytes)
-
             val messages = receivedData.split("\n")
 
             for (msg in messages) {
@@ -298,7 +400,8 @@ class MainActivity : ComponentActivity() {
 
                         distanceState.value = distance.toString()
 
-                        database.child("NovaCane").child("liveData")
+                        database.child("NovaCane")
+                            .child("liveData")
                             .setValue(
                                 mapOf(
                                     "distance" to distance,
@@ -342,26 +445,23 @@ class MainActivity : ComponentActivity() {
             vibrator.vibrate(
                 VibrationEffect.createOneShot(200, intensity)
             )
-        } else {
-            vibrator.vibrate(200)
-        }
+        } else vibrator.vibrate(200)
     }
 
     private fun speakSafe(text: String, language: String = "en") {
         val currentTime = System.currentTimeMillis()
-        if (currentTime - lastSpokenTime < speechCooldown) return
-
+        if (currentTime - lastSpokenTime < 3000) return
         lastSpokenTime = currentTime
 
         if (language == "ml")
             tts.language = Locale.forLanguageTag("ml-IN")
-        else
-            tts.language = Locale.US
+        else tts.language = Locale.US
 
         tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
     }
 
     override fun onDestroy() {
+        stopAlertSound()
         tts.shutdown()
         super.onDestroy()
     }
