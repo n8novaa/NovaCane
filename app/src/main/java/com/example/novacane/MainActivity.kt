@@ -1,19 +1,22 @@
 package com.example.novacane
 
-import androidx.compose.runtime.Composable
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothSocket
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.OnBackPressedCallback
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -26,6 +29,7 @@ import kotlin.concurrent.thread
 class MainActivity : ComponentActivity() {
 
     private lateinit var tts: TextToSpeech
+    private lateinit var vibrator: Vibrator
 
     private val deviceName = "NovaCane_ESP32"
     private val uuid: UUID =
@@ -34,14 +38,31 @@ class MainActivity : ComponentActivity() {
         BluetoothAdapter.getDefaultAdapter()
 
     private val alertState = mutableStateOf("Waiting for sensor data...")
+    private val distanceState = mutableStateOf("--")
 
-    // ✅ Voice cooldown variables
     private var lastSpokenTime = 0L
     private val speechCooldown = 3000L
+    private var lastZone = -1
+
+    // ✅ ROLE STATE MOVED TO ACTIVITY LEVEL
+    private val selectedRoleState = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Back button handling (modern)
+        onBackPressedDispatcher.addCallback(this,
+            object : OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    if (selectedRoleState.value != null) {
+                        selectedRoleState.value = null
+                    } else {
+                        finish()
+                    }
+                }
+            })
+
+        // Bluetooth permission
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (ActivityCompat.checkSelfPermission(
                     this,
@@ -61,24 +82,86 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+
         setContent {
-            novaCaneDashboard()
+            AppEntryPoint()
         }
 
         connectBluetooth()
     }
 
+    // ================= ENTRY =================
+
     @Composable
-    fun novaCaneDashboard() {
+    fun AppEntryPoint() {
+        val selectedRole = selectedRoleState.value
+
+        if (selectedRole == null) {
+            RoleSelectionScreen { role ->
+                selectedRoleState.value = role
+            }
+        } else {
+            if (selectedRole == "USER") {
+                UserDashboard()
+            } else {
+                GuardianDashboard()
+            }
+        }
+    }
+
+    // ================= ROLE SCREEN =================
+
+    @Composable
+    fun RoleSelectionScreen(onRoleSelected: (String) -> Unit) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+
+            Text("Nova Cane", fontSize = 26.sp)
+
+            Spacer(modifier = Modifier.height(40.dp))
+
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = { onRoleSelected("USER") }
+            ) {
+                Text("USER")
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = { onRoleSelected("GUARDIAN") }
+            ) {
+                Text("GUARDIAN")
+            }
+        }
+    }
+
+    // ================= USER DASHBOARD =================
+
+    @Composable
+    fun UserDashboard() {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+
             Text("Nova Cane – User Dashboard", fontSize = 22.sp)
 
             Spacer(Modifier.height(20.dp))
+
+            Text("Distance: ${distanceState.value} cm", fontSize = 20.sp)
+
+            Spacer(Modifier.height(10.dp))
 
             Text("Alert: ${alertState.value}", fontSize = 18.sp)
 
@@ -96,6 +179,27 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // ================= GUARDIAN DASHBOARD =================
+
+    @Composable
+    fun GuardianDashboard() {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+
+            Text("Guardian Mode", fontSize = 24.sp)
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Text("Waiting for SOS alerts...")
+        }
+    }
+
+    // ================= BLUETOOTH =================
+
     private fun connectBluetooth() {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -103,9 +207,7 @@ class MainActivity : ComponentActivity() {
                     this,
                     Manifest.permission.BLUETOOTH_CONNECT
                 ) != PackageManager.PERMISSION_GRANTED
-            ) {
-                return
-            }
+            ) return
         }
 
         val pairedDevices = bluetoothAdapter?.bondedDevices
@@ -113,17 +215,15 @@ class MainActivity : ComponentActivity() {
 
         if (device != null) {
 
-            val socket: BluetoothSocket =
-                device.createRfcommSocketToServiceRecord(uuid)
+            val socket = device.createRfcommSocketToServiceRecord(uuid)
 
             thread {
                 try {
                     socket.connect()
-                    runOnUiThread { alertState.value = "Bluetooth connected" }
-
-                    val inputStream: InputStream = socket.inputStream
-                    readData(inputStream)
-
+                    runOnUiThread {
+                        alertState.value = "Bluetooth connected"
+                    }
+                    readData(socket.inputStream)
                 } catch (e: Exception) {
                     e.printStackTrace()
                     runOnUiThread {
@@ -143,6 +243,7 @@ class MainActivity : ComponentActivity() {
         while (true) {
             val bytes = inputStream.read(buffer)
             val receivedData = String(buffer, 0, bytes)
+            Log.d("BT_DATA", receivedData)
 
             val messages = receivedData.split("\n")
 
@@ -151,19 +252,32 @@ class MainActivity : ComponentActivity() {
 
                 if (distance != null) {
                     runOnUiThread {
-                        when {
-                            distance < 30 -> {
-                                alertState.value = "Very close obstacle"
-                                speakSafe("മുന്നിൽ തടസം വളരെ അടുത്താണ്", "ml")
-                            }
 
-                            distance < 70 -> {
-                                alertState.value = "Obstacle ahead"
-                                speakSafe("Obstacle ahead")
-                            }
+                        distanceState.value = distance.toString()
 
-                            else -> {
-                                alertState.value = "Path clear"
+                        val zone = when {
+                            distance < 30 -> 0
+                            distance < 70 -> 1
+                            else -> 2
+                        }
+
+                        if (zone != lastZone) {
+                            lastZone = zone
+
+                            when (zone) {
+                                0 -> {
+                                    alertState.value = "Very close obstacle"
+                                    speakSafe("മുന്നിൽ തടസം വളരെ അടുത്താണ്", "ml")
+                                    vibrate(255)
+                                }
+                                1 -> {
+                                    alertState.value = "Obstacle ahead"
+                                    speakSafe("Obstacle ahead")
+                                    vibrate(150)
+                                }
+                                2 -> {
+                                    alertState.value = "Path clear"
+                                }
                             }
                         }
                     }
@@ -172,9 +286,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ✅ Cooldown speech function
-    private fun speakSafe(text: String, language: String = "en") {
+    private fun vibrate(intensity: Int) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator.vibrate(
+                VibrationEffect.createOneShot(200, intensity)
+            )
+        } else {
+            vibrator.vibrate(200)
+        }
+    }
 
+    private fun speakSafe(text: String, language: String = "en") {
         val currentTime = System.currentTimeMillis()
         if (currentTime - lastSpokenTime < speechCooldown) return
 
