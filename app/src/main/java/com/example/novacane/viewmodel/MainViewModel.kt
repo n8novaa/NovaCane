@@ -23,6 +23,8 @@ import android.app.NotificationManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 
+import com.example.novacane.core.AppState
+
 class MainViewModel(
     private val bluetoothManager: BluetoothService,
     private val firebaseManager: FirebaseManager,
@@ -113,7 +115,7 @@ class MainViewModel(
         _alertState.value = "Emergency Triggered"
 
         ttsManager.speak("Emergency alert sent")
-        vibrationController.vibrate(255)
+        vibrationController.vibrateSOS()
 
         firebaseManager.sendSOS(caneID)
 
@@ -163,7 +165,7 @@ class MainViewModel(
                                 _alertState.value = "Very Close"
                                 if (canSpeak()) {
                                     ttsManager.speak("മുന്നിൽ തടസം വളരെ അടുത്താണ്", "ml")
-                                    vibrationController.vibrate(255)
+                                    vibrationController.vibrateVeryClose()
                                 }
                             }
 
@@ -171,7 +173,7 @@ class MainViewModel(
                                 _alertState.value = "Obstacle Ahead"
                                 if (canSpeak()) {
                                     ttsManager.speak("Obstacle ahead")
-                                    vibrationController.vibrate(150)
+                                    vibrationController.vibrateObstacle()
                                 }
                             }
 
@@ -192,10 +194,15 @@ class MainViewModel(
 
     fun triggerSOS(caneID: String, context: Context) {
         handleSOS(caneID)
-        showLocalSOSNotification(context)
+
     }
 
     fun showLocalSOSNotification(context: Context) {
+
+
+        if (com.example.novacane.core.AppState.currentMode != "GUARDIAN") {
+            return
+        }
 
         val channelId = "sos_channel"
 

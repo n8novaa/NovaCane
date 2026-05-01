@@ -1,21 +1,35 @@
 package com.example.novacane.alert
 
-
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 
-class VibrationController(private val vibrator: Vibrator) {
+class VibrationController(
+    private val vibrator: Vibrator
+) {
 
-    fun vibrate(intensity: Int) {
-        if (intensity == 0) return
+    fun vibrateVeryClose() {
+        val pattern = longArrayOf(0, 300, 100, 300, 100, 300)
+        vibratePattern(pattern)
+    }
 
+    fun vibrateObstacle() {
+        val pattern = longArrayOf(0, 150, 100, 150)
+        vibratePattern(pattern)
+    }
+
+    fun vibrateSOS() {
+        val pattern = longArrayOf(0, 500, 200, 500, 200, 500, 200, 500)
+        vibratePattern(pattern)
+    }
+
+    private fun vibratePattern(pattern: LongArray) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             vibrator.vibrate(
-                VibrationEffect.createOneShot(200, intensity)
+                VibrationEffect.createWaveform(pattern, -1)
             )
         } else {
-            vibrator.vibrate(200)
+            vibrator.vibrate(pattern, -1)
         }
     }
 }

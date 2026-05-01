@@ -20,15 +20,9 @@ class FirebaseManager(private val db: DatabaseReference) {
             .child(userId)
             .child("liveData")
             .setValue(data)
-            .addOnSuccessListener {
-                Log.d("FIREBASE", "✅ liveData updated")
-            }
-            .addOnFailureListener {
-                Log.e("FIREBASE", "❌ liveData failed", it)
-            }
     }
 
-    // 🔴 2. SEND SOS (FAIL-SAFE)
+    // 🔴 2. SEND SOS
     fun sendSOS(userId: String) {
 
         val data = mapOf(
@@ -44,15 +38,9 @@ class FirebaseManager(private val db: DatabaseReference) {
             .child(userId)
             .child("sos")
             .setValue(data)
-            .addOnSuccessListener {
-                Log.d("SOS", "✅ SOS sent")
-            }
-            .addOnFailureListener {
-                Log.e("SOS", "❌ SOS failed", it)
-            }
     }
 
-    // 🟡 3. UPDATE SOS LOCATION (ASYNC)
+    // 🟡 3. UPDATE SOS LOCATION
     fun updateSOSLocation(userId: String, lat: Double, lon: Double) {
 
         db.child("users")
@@ -68,12 +56,15 @@ class FirebaseManager(private val db: DatabaseReference) {
         Log.d("SOS", "📍 Location updated → $lat, $lon")
     }
 
-    // 🟢 3. LISTEN ONLY TO SOS (GUARDIAN SIDE)
+    // 🟢 4. LISTEN TO SOS (FIXED)
     fun listenToSOS(
         userId: String,
-        onSOSChange: (Boolean, Double?, Double?) -> Unit
+        onSOSTriggered: (Double?, Double?) -> Unit
     ) {
+
         val ref = db.child("users").child(userId).child("sos")
+
+        var lastState = false // 🔴 track previous state
 
         ref.addValueEventListener(object : ValueEventListener {
 
@@ -85,7 +76,13 @@ class FirebaseManager(private val db: DatabaseReference) {
 
                 Log.d("SOS_LISTENER", "Active: $active, Lat: $lat, Lon: $lon")
 
-                onSOSChange(active, lat, lon)
+                // 🔴 Trigger ONLY when false → true
+                if (active && !lastState) {
+                    Log.d("SOS_LISTENER", "🚨 NEW SOS TRIGGERED")
+                    onSOSTriggered(lat, lon)
+                }
+
+                lastState = active
             }
 
             override fun onCancelled(error: DatabaseError) {
@@ -94,20 +91,16 @@ class FirebaseManager(private val db: DatabaseReference) {
         })
     }
 
+    // 🟣 5. SAVE GUARDIAN TOKEN
     fun saveGuardianToken(guardianId: String, token: String) {
 
         db.child("guardians")
             .child(guardianId)
             .child("fcmToken")
             .setValue(token)
-            .addOnSuccessListener {
-                Log.d("FCM", "✅ Token saved")
-            }
-            .addOnFailureListener {
-                Log.e("FCM", "❌ Token save failed", it)
-            }
     }
 
+    // 🟢 6. MARK SAFE
     fun markSafe(userId: String) {
 
         db.child("users")
@@ -115,11 +108,7 @@ class FirebaseManager(private val db: DatabaseReference) {
             .child("sos")
             .child("active")
             .setValue(false)
-            .addOnSuccessListener {
-                Log.d("SOS", "✅ Marked as SAFE")
-            }
-            .addOnFailureListener {
-                Log.e("SOS", "❌ Failed to mark safe", it)
-            }
+
+        Log.d("SOS", "✅ Marked as SAFE")
     }
 }

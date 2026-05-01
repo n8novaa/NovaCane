@@ -30,7 +30,7 @@ fun GuardianScreen(viewModel: GuardianViewModel) {
 
     // 🔥 Start Firebase listener
     LaunchedEffect(Unit) {
-        viewModel.startListening()
+        viewModel.startListening(context, "cane_test")
     }
 
     // 🔊 Alarm control (SIDE EFFECT ONLY)
