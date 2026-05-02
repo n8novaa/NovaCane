@@ -6,18 +6,17 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.ViewModel
-
 import com.example.novacane.firebase.FirebaseManager
 import com.google.firebase.database.FirebaseDatabase
-
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 class GuardianViewModel : ViewModel() {
 
-    private val firebaseManager = FirebaseManager(
-        FirebaseDatabase.getInstance().reference
-    )
+    private val database = FirebaseDatabase.getInstance().reference
+    private val firebaseManager = FirebaseManager(database)
+
+    private val caneID = "cane_test"
 
     private val _sosActive = MutableStateFlow(false)
     val sosActive: StateFlow<Boolean> = _sosActive
@@ -28,22 +27,61 @@ class GuardianViewModel : ViewModel() {
     private val _longitude = MutableStateFlow<Double?>(null)
     val longitude: StateFlow<Double?> = _longitude
 
-    // 🔴 SINGLE SOURCE OF TRUTH (listener)
-    fun startListening(context: Context, caneID: String) {
+    private val _isUserActive = MutableStateFlow(false)
+    val isUserActive: StateFlow<Boolean> = _isUserActive
+
+    private val _locationTimestamp = MutableStateFlow<Long?>(null)
+    val locationTimestamp: StateFlow<Long?> = _locationTimestamp
+
+    private val _sosTimestamp = MutableStateFlow<Long?>(null)
+    val sosTimestamp: StateFlow<Long?> = _sosTimestamp
+
+    private var isListening = false
+
+    fun startListening(context: Context) {
+
+        if (isListening) return
+        isListening = true
 
         firebaseManager.listenToSOS(caneID) { lat, lon ->
 
-            // 🔴 Update UI state
             _sosActive.value = true
             _latitude.value = lat
             _longitude.value = lon
 
-            // 🔴 Trigger notification ONLY on new SOS event
+            _sosTimestamp.value = System.currentTimeMillis()
+            _isUserActive.value = true
+
             showLocalSOSNotification(context)
         }
     }
 
-    fun showLocalSOSNotification(context: Context) {
+    fun fetchLatestLocation(
+        onResult: (Double?, Double?) -> Unit
+    ) {
+        val ref = database.child("users").child(caneID).child("liveLocation")
+
+        ref.get().addOnSuccessListener { snapshot ->
+
+            val lat = snapshot.child("latitude").getValue(Double::class.java)
+            val lon = snapshot.child("longitude").getValue(Double::class.java)
+            val timestamp = snapshot.child("timestamp").getValue(Long::class.java)
+
+            _locationTimestamp.value = timestamp
+
+            if (timestamp != null) {
+                val diff = System.currentTimeMillis() - timestamp
+                _isUserActive.value = diff < 5000
+            }
+
+            onResult(lat, lon)
+
+        }.addOnFailureListener {
+            onResult(null, null)
+        }
+    }
+
+    private fun showLocalSOSNotification(context: Context) {
 
         val channelId = "sos_channel"
 
@@ -51,7 +89,6 @@ class GuardianViewModel : ViewModel() {
             context.getSystemService(Context.NOTIFICATION_SERVICE)
                     as NotificationManager
 
-        // 🔴 Create notification channel (Android O+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 channelId,
@@ -73,7 +110,10 @@ class GuardianViewModel : ViewModel() {
     }
 
     fun markSafe() {
-        firebaseManager.markSafe("cane_test")
+        firebaseManager.markSafe(caneID)
+
         _sosActive.value = false
+        _latitude.value = null
+        _longitude.value = null
     }
 }

@@ -11,6 +11,8 @@ class TTSManager(context: Context) {
         it == TextToSpeech.SUCCESS
     }
 
+    private var textToSpeech: TextToSpeech? = null
+
     fun speak(text: String, lang: String = "en") {
         val now = System.currentTimeMillis()
         if (now - lastSpokenTime < 3000) return
@@ -26,5 +28,9 @@ class TTSManager(context: Context) {
 
     fun shutdown() {
         tts.shutdown()
+    }
+
+    fun stop() {
+        textToSpeech?.stop()
     }
 }

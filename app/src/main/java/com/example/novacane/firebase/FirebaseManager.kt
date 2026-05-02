@@ -53,10 +53,27 @@ class FirebaseManager(private val db: DatabaseReference) {
                 )
             )
 
-        Log.d("SOS", "📍 Location updated → $lat, $lon")
+        Log.d("SOS", "📍 SOS location updated → $lat, $lon")
     }
 
-    // 🟢 4. LISTEN TO SOS (FIXED)
+    // 🟣 4. UPDATE LIVE LOCATION (ON-DEMAND TRACKING SUPPORT)
+    fun updateLiveLocation(userId: String, lat: Double, lon: Double) {
+
+        val data = mapOf(
+            "latitude" to lat,
+            "longitude" to lon,
+            "timestamp" to System.currentTimeMillis()
+        )
+
+        Log.d("LOCATION", "Updating liveLocation → $lat, $lon")
+
+        db.child("users")
+            .child(userId)
+            .child("liveLocation")
+            .setValue(data)
+    }
+
+    // 🟢 5. LISTEN TO SOS (EDGE-TRIGGERED)
     fun listenToSOS(
         userId: String,
         onSOSTriggered: (Double?, Double?) -> Unit
@@ -64,7 +81,7 @@ class FirebaseManager(private val db: DatabaseReference) {
 
         val ref = db.child("users").child(userId).child("sos")
 
-        var lastState = false // 🔴 track previous state
+        var lastState = false
 
         ref.addValueEventListener(object : ValueEventListener {
 
@@ -76,7 +93,6 @@ class FirebaseManager(private val db: DatabaseReference) {
 
                 Log.d("SOS_LISTENER", "Active: $active, Lat: $lat, Lon: $lon")
 
-                // 🔴 Trigger ONLY when false → true
                 if (active && !lastState) {
                     Log.d("SOS_LISTENER", "🚨 NEW SOS TRIGGERED")
                     onSOSTriggered(lat, lon)
@@ -91,16 +107,18 @@ class FirebaseManager(private val db: DatabaseReference) {
         })
     }
 
-    // 🟣 5. SAVE GUARDIAN TOKEN
+    // 🟣 6. SAVE GUARDIAN TOKEN
     fun saveGuardianToken(guardianId: String, token: String) {
+
+        Log.d("FCM", "Saving token for $guardianId")
 
         db.child("guardians")
             .child(guardianId)
-            .child("fcmToken")
+            .child("token") // ✅ consistent naming
             .setValue(token)
     }
 
-    // 🟢 6. MARK SAFE
+    // 🟢 7. MARK SAFE
     fun markSafe(userId: String) {
 
         db.child("users")

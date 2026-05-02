@@ -154,7 +154,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startSystem() {
-        viewModel.start(caneID)
+        viewModel.startUserMode(caneID)
     }
 
     override fun onRequestPermissionsResult(

@@ -2,10 +2,9 @@ package com.example.novacane.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 import com.example.novacane.bluetooth.BluetoothService
 import com.example.novacane.bluetooth.ConnectionState
@@ -23,6 +22,7 @@ import android.app.NotificationManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 
+
 import com.example.novacane.core.AppState
 
 class MainViewModel(
@@ -33,6 +33,8 @@ class MainViewModel(
     private val locationManager: LocationManager
 ) : ViewModel() {
 
+    // ---------------- STATE ----------------
+
     private val _distanceState = MutableStateFlow<Int?>(null)
     val distanceState: StateFlow<Int?> = _distanceState
 
@@ -42,15 +44,44 @@ class MainViewModel(
     private val _connectionStateText = MutableStateFlow("Disconnected")
     val connectionStateText: StateFlow<String> = _connectionStateText
 
-    private val _sensorStatus = MutableStateFlow("Active")
+    private val _sensorStatus = MutableStateFlow("Inactive")
     val sensorStatus: StateFlow<String> = _sensorStatus
 
-    private var lastDataTimestamp = System.currentTimeMillis()
+    // ---------------- MODE CONTROL ----------------
 
-    // 🔴 Zone control
+    private var isUserModeActive = false
+
+    fun startUserMode(caneID: String) {
+
+        if (isUserModeActive) return
+
+        isUserModeActive = true
+        _sensorStatus.value = "Active"
+
+        updateLocationOnce(caneID) // ✅ on start
+        startBluetooth(caneID)
+    }
+
+    fun stopUserMode() {
+        isUserModeActive = false
+
+        stopAllFeedback()
+        bluetoothManager.disconnect()
+
+        _sensorStatus.value = "Inactive"
+        lastZone = -1
+    }
+
+    private fun stopAllFeedback() {
+        ttsManager.stop()
+        vibrationController.stop()
+    }
+
+    // ---------------- INTERNAL STATE ----------------
+
+    private var lastDataTimestamp = System.currentTimeMillis()
     private var lastZone = -1
 
-    // 🔴 COOLDOWN (THIS IS THE REAL FIX)
     private var lastSpokenTime = 0L
     private val SPEECH_COOLDOWN = 3000L
 
@@ -61,11 +92,15 @@ class MainViewModel(
         return true
     }
 
+    // ---------------- INIT ----------------
+
     init {
         observeConnectionState()
         startTimeoutMonitor()
         registerFCMToken()
     }
+
+    // ---------------- CONNECTION ----------------
 
     private fun observeConnectionState() {
         viewModelScope.launch {
@@ -85,17 +120,20 @@ class MainViewModel(
                     _alertState.value = "Cane disconnected"
                     _distanceState.value = null
                     _sensorStatus.value = "Disconnected"
-
                     lastZone = -1
                 }
             }
         }
     }
 
+    // ---------------- TIMEOUT ----------------
+
     private fun startTimeoutMonitor() {
         viewModelScope.launch {
             while (true) {
                 delay(2000)
+
+                if (!isUserModeActive) continue
 
                 val diff = System.currentTimeMillis() - lastDataTimestamp
 
@@ -103,36 +141,19 @@ class MainViewModel(
                     _distanceState.value = null
                     _alertState.value = "Sensor not responding"
                     _sensorStatus.value = "Disconnected"
-
                     lastZone = -1
                 }
             }
         }
     }
 
-    private fun handleSOS(caneID: String) {
+    // ---------------- BLUETOOTH ----------------
 
-        _alertState.value = "Emergency Triggered"
-
-        ttsManager.speak("Emergency alert sent")
-        vibrationController.vibrateSOS()
-
-        firebaseManager.sendSOS(caneID)
-
-        locationManager.getLocation { loc ->
-            if (loc != null) {
-                firebaseManager.updateSOSLocation(
-                    caneID,
-                    loc.latitude,
-                    loc.longitude
-                )
-            }
-        }
-    }
-
-    fun start(caneID: String) {
+    private fun startBluetooth(caneID: String) {
 
         bluetoothManager.connect { message ->
+
+            if (!isUserModeActive) return@connect
 
             when (val data = MessageParser.parse(message)) {
 
@@ -141,8 +162,6 @@ class MainViewModel(
                 is SensorData.Distance -> {
 
                     val distance = data.value
-
-                    // Ignore garbage
                     if (distance <= 0 || distance > 400) return@connect
 
                     lastDataTimestamp = System.currentTimeMillis()
@@ -179,7 +198,6 @@ class MainViewModel(
 
                             2 -> {
                                 _alertState.value = "Path Clear"
-                                // No sound
                             }
                         }
                     }
@@ -192,17 +210,45 @@ class MainViewModel(
         }
     }
 
-    fun triggerSOS(caneID: String, context: Context) {
-        handleSOS(caneID)
+    // ---------------- SOS ----------------
 
+    private fun handleSOS(caneID: String) {
+
+        if (!isUserModeActive) return
+
+        _alertState.value = "Emergency Triggered"
+
+        ttsManager.speak("Emergency alert sent")
+        vibrationController.vibrateSOS()
+
+        firebaseManager.sendSOS(caneID)
+
+        updateLocationOnce(caneID) // ✅ update location during SOS
     }
+
+    fun triggerSOS(caneID: String) {
+        handleSOS(caneID)
+    }
+
+    // ---------------- LOCATION ----------------
+
+    private fun updateLocationOnce(caneID: String) {
+        locationManager.getLocation { loc ->
+            if (loc != null) {
+                firebaseManager.updateLiveLocation(
+                    caneID,
+                    loc.latitude,
+                    loc.longitude
+                )
+            }
+        }
+    }
+
+    // ---------------- NOTIFICATION ----------------
 
     fun showLocalSOSNotification(context: Context) {
 
-
-        if (com.example.novacane.core.AppState.currentMode != "GUARDIAN") {
-            return
-        }
+        if (AppState.currentMode != "GUARDIAN") return
 
         val channelId = "sos_channel"
 
@@ -228,6 +274,8 @@ class MainViewModel(
 
         manager.notify(System.currentTimeMillis().toInt(), notification)
     }
+
+    // ---------------- FCM ----------------
 
     private fun registerFCMToken() {
         FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->

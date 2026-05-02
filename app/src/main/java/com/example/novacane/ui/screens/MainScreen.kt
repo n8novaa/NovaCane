@@ -3,10 +3,17 @@ package com.example.novacane.ui.screens
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+
 import androidx.compose.material3.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
 
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -19,6 +26,8 @@ import kotlinx.coroutines.flow.StateFlow
 import androidx.activity.compose.BackHandler
 import android.app.Activity
 import android.widget.Toast
+
+import androidx.compose.ui.Alignment
 
 import com.example.novacane.core.AppState
 
@@ -82,40 +91,98 @@ fun MainScreen(
     // 🔴 SCREEN RENDERING
     when (currentScreen) {
 
+        // ================= HOME =================
         Screen.HOME -> {
 
-            Column(
+            val gradient = Brush.verticalGradient(
+                colors = listOf(
+                    Color(0xFF0F172A),
+                    Color(0xFF1E293B),
+                    Color(0xFF334155)
+                )
+            )
+
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.Center
+                    .background(gradient)
+                    .padding(20.dp)
             ) {
 
-                Button(
-                    onClick = {
-                        currentScreen = Screen.USER
-                        AppState.currentMode = "USER"
-                              },
-                    modifier = Modifier.fillMaxWidth()
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(24.dp),
+                    modifier = Modifier.fillMaxSize()
                 ) {
-                    Text("User Mode")
-                }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                    // 🔷 HEADER
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
 
-                Button(
-                    onClick = {
-                        currentScreen = Screen.GUARDIAN
-                        AppState.currentMode = "GUARDIAN"
-                              },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Guardian Mode")
+                            Text(
+                                text = "NOVACANE",
+                                style = MaterialTheme.typography.headlineLarge.copy(
+                                    letterSpacing = 4.sp
+                                ),
+                                color = Color.White
+                            )
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            Text(
+                                text = "Assistive Navigation System",
+                                color = Color.White.copy(alpha = 0.6f)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // USER MODE
+                    GlassModeCard(
+                        title = "User Mode",
+                        subtitle = "Connected to smart cane",
+                        onClick = {
+                            currentScreen = Screen.USER
+                            AppState.currentMode = "USER"
+                        }
+                    )
+
+                    // GUARDIAN MODE
+                    GlassModeCard(
+                        title = "Guardian Mode",
+                        subtitle = "Monitor & respond to alerts",
+                        onClick = {
+                            currentScreen = Screen.GUARDIAN
+                            AppState.currentMode = "GUARDIAN"
+                        }
+                    )
+
+                    Spacer(modifier = Modifier.weight(1f))
+
+                    Text(
+                        text = "System Ready",
+                        color = Color.White.copy(alpha = 0.4f),
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
                 }
             }
         }
 
+        // ================= USER =================
         Screen.USER -> {
+
+            LaunchedEffect(Unit) {
+                viewModel.startUserMode("cane_test")
+            }
+
+            DisposableEffect(Unit) {
+                onDispose {
+                    viewModel.stopUserMode()
+                }
+            }
 
             Column(
                 modifier = Modifier
@@ -124,10 +191,7 @@ fun MainScreen(
                 verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
 
-                Text(
-                    text = "Bluetooth: $connection",
-                    style = MaterialTheme.typography.titleMedium
-                )
+                Text("Bluetooth: $connection")
 
                 Text(
                     text = distance?.let { "Distance: $it cm" } ?: "Distance: --",
@@ -138,49 +202,61 @@ fun MainScreen(
                     alert.contains("close", true) -> Color.Red
                     alert.contains("ahead", true) -> Color(0xFFFFA500)
                     alert.contains("clear", true) -> Color(0xFF2E7D32)
-                    alert.contains("not responding", true) -> Color.Gray
                     else -> Color.Gray
                 }
 
-                Text(
-                    text = "Status: $alert",
-                    color = color,
-                    style = MaterialTheme.typography.titleLarge
-                )
+                Text("Status: $alert", color = color)
 
                 val sensorColor =
                     if (sensor == "Active") Color(0xFF2E7D32) else Color.Red
 
-                Text(
-                    text = "Sensor: $sensor",
-                    color = sensorColor,
-                    style = MaterialTheme.typography.bodyLarge
-                )
-
-                Spacer(modifier = Modifier.height(30.dp))
+                Text("Sensor: $sensor", color = sensorColor)
 
                 Button(
-                    onClick = {
-                        viewModel.triggerSOS("cane_test", context)
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.Red
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(60.dp)
+                    onClick = { viewModel.triggerSOS("cane_test") },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        text = "SOS",
-                        color = Color.White,
-                        style = MaterialTheme.typography.titleLarge
-                    )
+                    Text("SOS", color = Color.White)
                 }
             }
         }
 
+        // ================= GUARDIAN =================
         Screen.GUARDIAN -> {
             GuardianScreen(viewModel = guardianViewModel)
+        }
+    }
+}
+
+@Composable
+fun GlassModeCard(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color.White.copy(alpha = 0.08f))
+            .clickable { onClick() }
+            .padding(20.dp)
+    ) {
+        Column {
+
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleLarge,
+                color = Color.White
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                text = subtitle,
+                color = Color.White.copy(alpha = 0.6f)
+            )
         }
     }
 }
