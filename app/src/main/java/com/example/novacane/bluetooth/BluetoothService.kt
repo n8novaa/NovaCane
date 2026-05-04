@@ -33,6 +33,10 @@ class BluetoothService(
     private var socket: BluetoothSocket? = null
     private var connectedDevice: BluetoothDevice? = null
 
+    // 🔴 CONTROL FLAG (FIX)
+    @Volatile
+    private var shouldReconnect = true
+
     fun init(adapter: BluetoothAdapter?) {
         bluetoothAdapter = adapter
     }
@@ -41,6 +45,9 @@ class BluetoothService(
     fun connect(onDataReceived: (String) -> Unit) {
 
         Log.d("BT_DEBUG", "connect() called")
+
+        // 🔴 RESET FLAG ON NEW CONNECTION
+        shouldReconnect = true
 
         val device = bluetoothAdapter?.bondedDevices
             ?.firstOrNull { it.name == deviceName }
@@ -98,10 +105,12 @@ class BluetoothService(
         var accumulatedData = ""
 
         try {
-            while (true) {
+            while (shouldReconnect) {
+
                 val bytes = inputStream.read(buffer)
 
-                if (bytes == -1) {
+                // 🔴 Stop immediately if disconnected
+                if (bytes == -1 || !shouldReconnect) {
                     throw Exception("Stream closed")
                 }
 
@@ -122,7 +131,9 @@ class BluetoothService(
                     }
                 }
             }
+
         } catch (e: Exception) {
+
             Log.e("BT_DEBUG", "❌ Read Error", e)
 
             _connectionState.value = ConnectionState.DISCONNECTED
@@ -131,8 +142,12 @@ class BluetoothService(
                 socket?.close()
             } catch (_: Exception) {}
 
-            // 🔁 Trigger reconnection
-            startReconnection(onDataReceived)
+            // 🔴 Only reconnect if still allowed
+            if (shouldReconnect) {
+                startReconnection(onDataReceived)
+            } else {
+                Log.d("BT_DEBUG", "Reconnection blocked (manual disconnect)")
+            }
         }
     }
 
@@ -144,7 +159,8 @@ class BluetoothService(
 
         CoroutineScope(Dispatchers.IO).launch {
 
-            while (_connectionState.value != ConnectionState.CONNECTED) {
+            // 🔴 FIXED LOOP
+            while (shouldReconnect && _connectionState.value != ConnectionState.CONNECTED) {
 
                 try {
                     delay(3000)
@@ -180,6 +196,7 @@ class BluetoothService(
 
     fun disconnect() {
         try {
+            shouldReconnect = false   // 🔴 STOP RECONNECT LOOP
             socket?.close()
             _connectionState.value = ConnectionState.DISCONNECTED
             Log.d("BT_DEBUG", "Disconnected")

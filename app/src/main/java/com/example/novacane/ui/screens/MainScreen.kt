@@ -20,6 +20,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 
 import com.example.novacane.viewmodel.MainViewModel
 import com.example.novacane.viewmodel.GuardianViewModel
+import com.example.novacane.ui.screens.UserScreen
 
 import kotlinx.coroutines.flow.StateFlow
 
@@ -184,42 +185,7 @@ fun MainScreen(
                 }
             }
 
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(20.dp)
-            ) {
-
-                Text("Bluetooth: $connection")
-
-                Text(
-                    text = distance?.let { "Distance: $it cm" } ?: "Distance: --",
-                    style = MaterialTheme.typography.headlineMedium
-                )
-
-                val color = when {
-                    alert.contains("close", true) -> Color.Red
-                    alert.contains("ahead", true) -> Color(0xFFFFA500)
-                    alert.contains("clear", true) -> Color(0xFF2E7D32)
-                    else -> Color.Gray
-                }
-
-                Text("Status: $alert", color = color)
-
-                val sensorColor =
-                    if (sensor == "Active") Color(0xFF2E7D32) else Color.Red
-
-                Text("Sensor: $sensor", color = sensorColor)
-
-                Button(
-                    onClick = { viewModel.triggerSOS("cane_test") },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("SOS", color = Color.White)
-                }
-            }
+            UserScreen(viewModel = viewModel)
         }
 
         // ================= GUARDIAN =================

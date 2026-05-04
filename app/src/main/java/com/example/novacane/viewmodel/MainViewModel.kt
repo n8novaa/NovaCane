@@ -15,6 +15,7 @@ import com.example.novacane.tts.TTSManager
 import com.example.novacane.alert.VibrationController
 import com.example.novacane.location.LocationManager
 import com.google.firebase.messaging.FirebaseMessaging
+import android.util.Log
 
 import android.content.Context
 import android.app.NotificationChannel
@@ -46,6 +47,12 @@ class MainViewModel(
 
     private val _sensorStatus = MutableStateFlow("Inactive")
     val sensorStatus: StateFlow<String> = _sensorStatus
+
+    // 🔴 ADD THESE VARIABLES INSIDE CLASS (near other variables)
+
+    private var awaitingConfirmation = false
+    private var firstTriggerTime = 0L
+    private val CONFIRM_WINDOW = 3000L
 
     // ---------------- MODE CONTROL ----------------
 
@@ -143,6 +150,13 @@ class MainViewModel(
                     _sensorStatus.value = "Disconnected"
                     lastZone = -1
                 }
+
+                if (awaitingConfirmation &&
+                    System.currentTimeMillis() - firstTriggerTime > CONFIRM_WINDOW
+                ) {
+                    awaitingConfirmation = false
+                    Log.d("SOS", "Confirmation expired")
+                }
             }
         }
     }
@@ -153,11 +167,13 @@ class MainViewModel(
 
         bluetoothManager.connect { message ->
 
+            Log.d("RAW_BT", "MESSAGE = [$message]")
+
             if (!isUserModeActive) return@connect
 
             when (val data = MessageParser.parse(message)) {
 
-                is SensorData.SOS -> handleSOS(caneID)
+                is SensorData.SOS -> processSOS(caneID)
 
                 is SensorData.Distance -> {
 
@@ -214,6 +230,8 @@ class MainViewModel(
 
     private fun handleSOS(caneID: String) {
 
+        awaitingConfirmation = false
+
         if (!isUserModeActive) return
 
         _alertState.value = "Emergency Triggered"
@@ -224,6 +242,40 @@ class MainViewModel(
         firebaseManager.sendSOS(caneID)
 
         updateLocationOnce(caneID) // ✅ update location during SOS
+    }
+
+    private fun processSOS(caneID: String) {
+
+        val now = System.currentTimeMillis()
+
+        if (!awaitingConfirmation) {
+
+            // 🔴 FIRST TRIGGER
+            awaitingConfirmation = true
+            firstTriggerTime = now
+
+            Log.d("SOS", "Waiting for confirmation")
+
+            ttsManager.speak("Press again to confirm emergency")
+            vibrationController.vibrateObstacle()
+
+            return
+        }
+
+        if (now - firstTriggerTime <= CONFIRM_WINDOW) {
+
+            Log.d("SOS", "CONFIRMED")
+
+            handleSOS(caneID)
+
+        } else {
+
+            // ⏱️ Timeout → restart confirmation
+            firstTriggerTime = now
+
+            ttsManager.speak("Press again to confirm emergency")
+            vibrationController.vibrateObstacle()
+        }
     }
 
     fun triggerSOS(caneID: String) {
