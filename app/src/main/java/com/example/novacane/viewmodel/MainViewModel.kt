@@ -15,6 +15,7 @@ import com.example.novacane.tts.TTSManager
 import com.example.novacane.alert.VibrationController
 import com.example.novacane.location.LocationManager
 import com.google.firebase.messaging.FirebaseMessaging
+import com.google.firebase.database.*
 import android.util.Log
 
 import android.content.Context
@@ -22,7 +23,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
-
 
 import com.example.novacane.core.AppState
 
@@ -48,11 +48,14 @@ class MainViewModel(
     private val _sensorStatus = MutableStateFlow("Inactive")
     val sensorStatus: StateFlow<String> = _sensorStatus
 
-    // 🔴 ADD THESE VARIABLES INSIDE CLASS (near other variables)
+    // ---------------- SOS CONFIRMATION ----------------
 
     private var awaitingConfirmation = false
     private var firstTriggerTime = 0L
     private val CONFIRM_WINDOW = 3000L
+
+    // 🔴 ACK TRACKING
+    private var lastSOSState: Boolean? = null
 
     // ---------------- MODE CONTROL ----------------
 
@@ -65,8 +68,9 @@ class MainViewModel(
         isUserModeActive = true
         _sensorStatus.value = "Active"
 
-        updateLocationOnce(caneID) // ✅ on start
+        updateLocationOnce(caneID)
         startBluetooth(caneID)
+        listenToSOSStatus(caneID)
     }
 
     fun stopUserMode() {
@@ -232,16 +236,19 @@ class MainViewModel(
 
         awaitingConfirmation = false
 
-        if (!isUserModeActive) return
-
+        // 🔴 ALWAYS GIVE FEEDBACK (FIXED)
         _alertState.value = "Emergency Triggered"
 
         ttsManager.speak("Emergency alert sent")
         vibrationController.vibrateSOS()
 
-        firebaseManager.sendSOS(caneID)
+        if (!isUserModeActive) {
+            Log.d("SOS", "Mode inactive → skipping backend")
+            return
+        }
 
-        updateLocationOnce(caneID) // ✅ update location during SOS
+        firebaseManager.sendSOS(caneID)
+        updateLocationOnce(caneID)
     }
 
     private fun processSOS(caneID: String) {
@@ -250,29 +257,21 @@ class MainViewModel(
 
         if (!awaitingConfirmation) {
 
-            // 🔴 FIRST TRIGGER
             awaitingConfirmation = true
             firstTriggerTime = now
 
-            Log.d("SOS", "Waiting for confirmation")
-
             ttsManager.speak("Press again to confirm emergency")
             vibrationController.vibrateObstacle()
-
             return
         }
 
         if (now - firstTriggerTime <= CONFIRM_WINDOW) {
 
-            Log.d("SOS", "CONFIRMED")
-
             handleSOS(caneID)
 
         } else {
 
-            // ⏱️ Timeout → restart confirmation
             firstTriggerTime = now
-
             ttsManager.speak("Press again to confirm emergency")
             vibrationController.vibrateObstacle()
         }
@@ -280,6 +279,43 @@ class MainViewModel(
 
     fun triggerSOS(caneID: String) {
         handleSOS(caneID)
+    }
+
+    // ---------------- ACK ----------------
+
+    private fun listenToSOSStatus(caneID: String) {
+
+        val ref = FirebaseDatabase.getInstance()
+            .getReference("users/$caneID/sos/active")
+
+        ref.addValueEventListener(object : ValueEventListener {
+
+            override fun onDataChange(snapshot: DataSnapshot) {
+
+                val isActive = snapshot.getValue(Boolean::class.java)
+
+                if (isActive != null) {
+
+                    if (lastSOSState == true && isActive == false) {
+
+                        Log.d("SOS_FLOW", "Guardian marked SAFE")
+                        onSOSResolved()
+                    }
+
+                    lastSOSState = isActive
+                }
+            }
+
+            override fun onCancelled(error: DatabaseError) {}
+        })
+    }
+
+    private fun onSOSResolved() {
+
+        _alertState.value = "Safe"
+
+        ttsManager.speak("Guardian confirmed. You are safe now")
+        vibrationController.vibrateObstacle()
     }
 
     // ---------------- LOCATION ----------------

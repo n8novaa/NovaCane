@@ -16,25 +16,31 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontWeight
 import com.example.novacane.R
 import com.example.novacane.viewmodel.GuardianViewModel
 import kotlinx.coroutines.delay
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.text.font.FontWeight
+import java.text.SimpleDateFormat
+import java.util.*
 
 @Composable
 fun GuardianScreen(viewModel: GuardianViewModel) {
 
     val sosActive by viewModel.sosActive.collectAsState()
     val isUserActive by viewModel.isUserActive.collectAsState()
+    val lastSeen by viewModel.lastSeenText.collectAsState()
+    val sosHistory by viewModel.sosHistory.collectAsState()
 
     val context = LocalContext.current
     var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
     var blink by remember { mutableStateOf(true) }
 
-    // 🔴 Start listener
+    // 🔴 Start listeners
     LaunchedEffect(Unit) {
         viewModel.startListening(context)
+        viewModel.startUserMonitoring()
+        viewModel.listenToSOSHistory()
     }
 
     // 🔊 Alarm
@@ -58,7 +64,6 @@ fun GuardianScreen(viewModel: GuardianViewModel) {
         }
     }
 
-    // 🎨 Gradient Background
     val gradient = Brush.verticalGradient(
         colors = listOf(
             Color(0xFF0F172A),
@@ -74,9 +79,7 @@ fun GuardianScreen(viewModel: GuardianViewModel) {
             .padding(20.dp)
     ) {
 
-        Column(
-            verticalArrangement = Arrangement.spacedBy(20.dp)
-        ) {
+        Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
 
             // 🔷 HEADER
             Box(
@@ -85,7 +88,6 @@ fun GuardianScreen(viewModel: GuardianViewModel) {
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
 
-                    // 🔷 Main Title
                     Text(
                         text = "GUARDIAN",
                         style = MaterialTheme.typography.headlineLarge.copy(
@@ -95,40 +97,39 @@ fun GuardianScreen(viewModel: GuardianViewModel) {
                         color = Color.White
                     )
 
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    // 🔹 Subtitle
                     Text(
                         text = "Monitoring Dashboard",
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            letterSpacing = 1.sp
-                        ),
                         color = Color.White.copy(alpha = 0.6f)
                     )
                 }
             }
 
-            // 🟢 USER STATUS CARD (Glass)
+            // 🟢 USER STATUS + LAST SEEN
             GlassCard {
                 Column {
-                    Text(
-                        "User Status",
-                        color = Color.White.copy(alpha = 0.7f)
-                    )
+
+                    Text("User Status", color = Color.White.copy(alpha = 0.7f))
 
                     Spacer(modifier = Modifier.height(6.dp))
 
                     Text(
                         text = if (isUserActive) "Active" else "Inactive",
-                        color = if (isUserActive) Color.Green else Color.LightGray,
+                        color = if (isUserActive) Color.Green else Color.Gray,
                         style = MaterialTheme.typography.titleLarge
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Text(
+                        text = "Last Seen: $lastSeen",
+                        color = Color.White.copy(alpha = 0.6f),
+                        style = MaterialTheme.typography.bodySmall
                     )
                 }
             }
 
-            // 🔴 SOS CARD
+            // 🔴 SOS STATUS
             if (sosActive) {
-
                 GlassCard(
                     backgroundColor = if (blink)
                         Color.Red.copy(alpha = 0.6f)
@@ -147,24 +148,18 @@ fun GuardianScreen(viewModel: GuardianViewModel) {
                     }
                 }
             } else {
-
                 GlassCard {
-                    Text(
-                        "No active SOS",
-                        color = Color.LightGray
-                    )
+                    Text("No active SOS", color = Color.LightGray)
                 }
             }
 
-            // ⚡ ACTION CARD
+            // 📍 ACTIONS
             GlassCard {
-
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
 
                     Button(
                         onClick = {
-                            viewModel.fetchLatestLocation { lat: Double?, lon: Double? ->
-
+                            viewModel.fetchLatestLocation { lat, lon ->
                                 if (lat != null && lon != null) {
                                     val uri = Uri.parse("geo:$lat,$lon?q=$lat,$lon")
                                     context.startActivity(Intent(Intent.ACTION_VIEW, uri))
@@ -177,8 +172,7 @@ fun GuardianScreen(viewModel: GuardianViewModel) {
                                 }
                             }
                         },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("Track User")
                     }
@@ -189,14 +183,15 @@ fun GuardianScreen(viewModel: GuardianViewModel) {
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = Color(0xFF22C55E)
                             ),
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp)
+                            modifier = Modifier.fillMaxWidth()
                         ) {
                             Text("Mark as Safe", color = Color.White)
                         }
                     }
                 }
             }
+
+
         }
     }
 }

@@ -7,7 +7,7 @@ import android.app.NotificationManager
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.ViewModel
 import com.example.novacane.firebase.FirebaseManager
-import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.database.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -18,6 +18,8 @@ class GuardianViewModel : ViewModel() {
 
     private val caneID = "cane_test"
 
+    // ---------------- SOS STATE ----------------
+
     private val _sosActive = MutableStateFlow(false)
     val sosActive: StateFlow<Boolean> = _sosActive
 
@@ -27,16 +29,34 @@ class GuardianViewModel : ViewModel() {
     private val _longitude = MutableStateFlow<Double?>(null)
     val longitude: StateFlow<Double?> = _longitude
 
+    private val _sosTimestamp = MutableStateFlow<Long?>(null)
+    val sosTimestamp: StateFlow<Long?> = _sosTimestamp
+
+    // ---------------- USER STATUS ----------------
+
     private val _isUserActive = MutableStateFlow(false)
     val isUserActive: StateFlow<Boolean> = _isUserActive
+
+    private val _lastSeenText = MutableStateFlow("Unknown")
+    val lastSeenText: StateFlow<String> = _lastSeenText
 
     private val _locationTimestamp = MutableStateFlow<Long?>(null)
     val locationTimestamp: StateFlow<Long?> = _locationTimestamp
 
-    private val _sosTimestamp = MutableStateFlow<Long?>(null)
-    val sosTimestamp: StateFlow<Long?> = _sosTimestamp
+    // ---------------- SOS HISTORY ----------------
+
+    data class SOSLog(
+        val timestamp: Long,
+        val lat: Double?,
+        val lon: Double?
+    )
+
+    private val _sosHistory = MutableStateFlow<List<SOSLog>>(emptyList())
+    val sosHistory: StateFlow<List<SOSLog>> = _sosHistory
 
     private var isListening = false
+
+    // ---------------- SOS LISTENER ----------------
 
     fun startListening(context: Context) {
 
@@ -55,6 +75,39 @@ class GuardianViewModel : ViewModel() {
             showLocalSOSNotification(context)
         }
     }
+
+    // ---------------- USER ACTIVITY MONITOR ----------------
+
+    fun startUserMonitoring() {
+
+        val ref = database.child("users").child(caneID).child("liveData")
+
+        ref.addValueEventListener(object : ValueEventListener {
+
+            override fun onDataChange(snapshot: DataSnapshot) {
+
+                val timestamp = snapshot.child("timestamp")
+                    .getValue(Long::class.java)
+
+                if (timestamp != null) {
+
+                    val diff = System.currentTimeMillis() - timestamp
+
+                    _isUserActive.value = diff < 5000
+
+                    _lastSeenText.value = when {
+                        diff < 3000 -> "Just now"
+                        diff < 10000 -> "${diff / 1000}s ago"
+                        else -> "Inactive"
+                    }
+                }
+            }
+
+            override fun onCancelled(error: DatabaseError) {}
+        })
+    }
+
+    // ---------------- LOCATION FETCH ----------------
 
     fun fetchLatestLocation(
         onResult: (Double?, Double?) -> Unit
@@ -80,6 +133,43 @@ class GuardianViewModel : ViewModel() {
             onResult(null, null)
         }
     }
+
+    // ---------------- SOS HISTORY ----------------
+
+    fun listenToSOSHistory() {
+
+        val ref = database.child("users").child(caneID).child("sosHistory")
+
+        ref.limitToLast(5).addValueEventListener(object : ValueEventListener {
+
+            override fun onDataChange(snapshot: DataSnapshot) {
+
+                val list = mutableListOf<SOSLog>()
+
+                for (child in snapshot.children) {
+
+                    val timestamp = child.child("timestamp")
+                        .getValue(Long::class.java)
+
+                    val lat = child.child("latitude")
+                        .getValue(Double::class.java)
+
+                    val lon = child.child("longitude")
+                        .getValue(Double::class.java)
+
+                    if (timestamp != null) {
+                        list.add(SOSLog(timestamp, lat, lon))
+                    }
+                }
+
+                _sosHistory.value = list.sortedByDescending { it.timestamp }
+            }
+
+            override fun onCancelled(error: DatabaseError) {}
+        })
+    }
+
+    // ---------------- NOTIFICATION ----------------
 
     private fun showLocalSOSNotification(context: Context) {
 
@@ -108,6 +198,8 @@ class GuardianViewModel : ViewModel() {
 
         manager.notify(1001, notification)
     }
+
+    // ---------------- MARK SAFE ----------------
 
     fun markSafe() {
         firebaseManager.markSafe(caneID)
