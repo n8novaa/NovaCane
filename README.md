@@ -118,18 +118,11 @@ NovaCane was designed with accessibility as a primary objective rather than an a
 
 # Screenshots
 
-## Home Screen
-
-![Home Screen](screenshots/home_screen.jpeg)
-
-## User Screen
-
-![User Screen](screenshots/user_screen.jpeg)
-
-## Guardian Screen
-
-![Guardian Screen](screenshots/guardian_screen.jpeg)
-
+<p align="center">
+  <img src="screenshots/home_screen.jpeg" width="220"/>
+  <img src="screenshots/user_screen.jpeg" width="220"/>
+  <img src="screenshots/guardian_screen.jpeg" width="220"/>
+</p>
 ---
 
 # Engineering Challenges Solved
