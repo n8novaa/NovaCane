@@ -123,6 +123,7 @@ NovaCane was designed with accessibility as a primary objective rather than an a
   <img src="screenshots/user_screen.jpeg" width="220"/>
   <img src="screenshots/guardian_screen.jpeg" width="220"/>
 </p>
+
 ---
 
 # Engineering Challenges Solved
