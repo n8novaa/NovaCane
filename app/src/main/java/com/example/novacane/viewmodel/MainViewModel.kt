@@ -314,7 +314,7 @@ class MainViewModel(
 
         _alertState.value = "Safe"
 
-        ttsManager.speak("Guardian confirmed. You are safe now")
+        ttsManager.speak("Guardian confirmed. help is on the way")
         vibrationController.vibrateObstacle()
     }
 
