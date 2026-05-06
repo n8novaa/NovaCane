@@ -120,15 +120,15 @@ NovaCane was designed with accessibility as a primary objective rather than an a
 
 ## Home Screen
 
-![Home Screen](novacane/screenshots/home_screen.jpeg)
+![Home Screen](screenshots/home_screen.jpeg)
 
 ## User Screen
 
-![User Screen](novacane/screenshots/user_screen.jpeg)
+![User Screen](screenshots/user_screen.jpeg)
 
 ## Guardian Screen
 
-![Guardian Screen](novacane/screenshots/guardian_screen.jpeg)
+![Guardian Screen](screenshots/guardian_screen.jpeg)
 
 ---
 
